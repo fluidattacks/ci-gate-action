@@ -1,0 +1,44 @@
+name: 'Fluid Attacks CI Agent'
+description: 'Check for open vulnerabilities in your repository using the Fluid Attacks CI Agent'
+author: 'Fluid Attacks'
+
+branding:
+  icon: 'shield'
+  color: 'red'
+
+inputs:
+  api_token:
+    description: 'CI Gate token for authentication with the Fluid Attacks platform'
+    required: true
+  repo_name:
+    description: 'Git repository nickname in the Fluid Attacks platform'
+    required: true
+  strict:
+    description: 'Enable strict mode. Breaks the build if open or untreated vulnerabilities are found.'
+    required: false
+    default: 'false'
+  report_output_path:
+    description: 'Path relative to the workspace root where the JSON report will be saved. If not set, no report is written.'
+    required: false
+    default: ''
+
+outputs:
+  vulnerabilities_found:
+    description: 'Whether policy-breaking vulnerabilities were found (true/false)'
+    value: ${{ steps.run.outputs.vulnerabilities_found }}
+  report_output_path:
+    description: 'Path to the JSON report file. Only set when the report_output_path input is configured.'
+    value: ${{ steps.run.outputs.report_output_path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Run CI Agent
+      id: run
+      shell: bash
+      env:
+        FA_TOKEN: ${{ inputs.api_token }}
+        FA_REPO_NAME: ${{ inputs.repo_name }}
+        FA_STRICT: ${{ inputs.strict }}
+        FA_REPORT_PATH: ${{ inputs.report_output_path }}
+      run: bash "${{ github.action_path }}/run.sh"
