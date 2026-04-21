@@ -5,7 +5,7 @@ if [[ -z "${FA_REPO_NAME}" ]]; then
   FA_REPO_NAME="${GITHUB_REPOSITORY##*/}"
 fi
 
-echo "::notice::Running CI Agent for repository: ${FA_REPO_NAME}"
+echo "::notice::Running CI Gate for repository: ${FA_REPO_NAME}"
 
 STRICT_FLAG="--lax"
 if [[ "${FA_STRICT}" == "true" ]]; then
@@ -28,7 +28,7 @@ if [[ ${exit_code} -eq 0 ]]; then
 elif [[ ${exit_code} -eq 1 ]]; then
   echo "vulnerabilities_found=true" >> "${GITHUB_OUTPUT}"
 else
-  echo "::error::CI Agent exited with unexpected code ${exit_code}"
+  echo "::error::CI Gate exited with unexpected code ${exit_code}"
   exit "${exit_code}"
 fi
 

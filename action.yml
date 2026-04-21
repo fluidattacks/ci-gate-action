@@ -1,5 +1,5 @@
-name: 'Fluid Attacks CI Agent'
-description: 'Check for open vulnerabilities in your repository using the Fluid Attacks CI Agent'
+name: 'Fluid Attacks CI Gate'
+description: 'Check for open vulnerabilities in your repository using the Fluid Attacks CI Gate'
 author: 'Fluid Attacks'
 
 branding:
@@ -34,7 +34,7 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - name: Run CI Agent
+    - name: Run CI Gate
       id: run
       shell: bash
       env:
