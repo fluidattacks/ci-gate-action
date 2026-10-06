@@ -19,7 +19,7 @@ inputs:
     required: false
     default: 'false'
   report_output_path:
-    description: 'Path relative to the workspace root where the JSON report will be saved. If not set, no report is written.'
+    description: 'Path relative to the workspace root where the JSON report will be saved. It must stay inside the workspace. If not set, the report is not saved in the workspace.'
     required: false
     default: ''
 
