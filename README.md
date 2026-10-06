@@ -24,6 +24,8 @@ on:
 jobs:
   ci-gate:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: fluidattacks/ci-gate-action@<version>
         id: gate
@@ -46,12 +48,15 @@ Replace `<version>` with the latest release tag and `my-repo` with the repositor
 - A **CI Gate token** generated from the **DevSecOps** section of the platform.
 - GitHub Actions enabled on the repository.
 - A **Linux runner** (`ubuntu-latest` or equivalent) — the action requires Docker, which is only available on Linux-hosted runners.
+- The step runs directly on the runner, not inside a job container (`jobs.<job_id>.container`), because the action mounts the workspace into its own container.
 
 ## How it works
 
-The action runs the Fluid Attacks CI Gate (`fluidattacks/forces:latest`) as a Docker container. The gate authenticates with the Fluid Attacks platform using the CI Gate token, retrieves the vulnerability findings already reported for the specified repository, and evaluates them against your group's security policies.
+The action runs the Fluid Attacks CI Gate (`ghcr.io/fluidattacks/forces:latest`) as a Docker container. The gate authenticates with the Fluid Attacks platform using the CI Gate token, retrieves the vulnerability findings already reported for the specified repository, and evaluates them against your group's security policies.
 
-In lax mode (default), the action always exits successfully and sets `vulnerabilities_found` based on the result. In strict mode, the action fails the job if open or untreated vulnerabilities that break policy are found.
+In lax mode (default), the job passes even when vulnerabilities break policy, and `vulnerabilities_found` tells you whether they did. In strict mode, the job fails with exit code 66 when they do. In both modes, the job fails if the gate itself cannot finish, for example because the token is invalid.
+
+The container runs in the job workspace, mounted read-only. If the workflow checks out the repository before this step, the gate reads the commit, branch and origin from Git. Otherwise, it takes the commit and branch from GitHub (`GITHUB_SHA` and `GITHUB_REF_NAME`). The gate needs no Git credentials, so set `persist-credentials: false` on `actions/checkout`. With `pull_request_target`, keep the checkout on its default ref, the base branch, and do not check out the pull request's code.
 
 ## Action inputs
 
@@ -60,13 +65,13 @@ In lax mode (default), the action always exits successfully and sets `vulnerabil
 | `api_token` | Yes | — | CI Gate token for authenticating with the Fluid Attacks platform. Use a secret: `${{ secrets.FA_API_TOKEN }}`. |
 | `repo_name` | No | GitHub repo name | Repository nickname as configured in the Fluid Attacks platform. When not set, defaults to the GitHub repository name (`GITHUB_REPOSITORY` minus the owner prefix). |
 | `strict` | No | `false` | Set to `true` to enable strict mode. The job fails if open or untreated vulnerabilities that break policy are found. |
-| `report_output_path` | No | — | Path relative to the workspace root where the JSON report will be saved. If not set, no report file is written. |
+| `report_output_path` | No | — | Path relative to the workspace root where the JSON report will be saved. It must stay inside the workspace. If not set, the report is not saved in the workspace. |
 
 ## Action outputs
 
 | Output | Description |
 |---|---|
-| `vulnerabilities_found` | `true` if policy-breaking vulnerabilities were found, `false` otherwise. |
+| `vulnerabilities_found` | `true` if policy-breaking vulnerabilities were found, in lax or strict mode, `false` otherwise. Not set when the gate itself fails. |
 | `report_output_path` | Path to the JSON report file. Only set when the `report_output_path` input is configured. |
 
 You can use these outputs in subsequent workflow steps:
@@ -145,7 +150,9 @@ Confirm that the `repo_name` input matches the repository nickname configured in
 
 ### The pipeline fails unexpectedly
 
-If `strict: true` is set, the job fails whenever policy-breaking vulnerabilities are found. This is intentional. Set `strict: false` if you want the check to report results without failing the pipeline.
+If `strict: true` is set, the job fails with exit code 66 whenever policy-breaking vulnerabilities are found. This is intentional. Set `strict: false` if you want the check to report results without failing the pipeline.
+
+Any other non-zero exit code means the check did not finish, and the log shows the reason as an error. `CI Gate failed with exit code` followed by the code comes from the gate: check the token, the `repo_name` input and the network access to the Fluid Attacks platform. Exit code 2 with `must be a single line` or `must be a file path inside the workspace` points to the `repo_name` or `report_output_path` inputs.
 
 ### The action fails on a non-Linux runner
 
