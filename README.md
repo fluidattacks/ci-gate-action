@@ -1,14 +1,15 @@
 # Fluid Attacks CI Gate
 
-CI gate action for your GitHub repositories. Connects to the Fluid Attacks platform and checks whether your repository has open vulnerabilities reported by Fluid Attacks. Requires a Fluid Attacks account and a CI Gate token.
+CI gate action for your GitHub repositories. Connects to the Fluid Attacks platform and checks whether your repository has open vulnerabilities reported by Fluid Attacks. Requires a Fluid Attacks account. Authenticate with OpenID Connect (no secret to store) or with a CI Gate token.
 
 ## Quick Start
 
-### 1. Store your CI Gate token as a secret
+### 1. Choose how to authenticate
 
-In your repository, go to **Settings → Secrets and variables → Actions** and create a new secret named `FA_API_TOKEN` with your CI Gate token.
+The action needs the `group` input with both ways of authenticating.
 
-To generate or retrieve the token, go to **Organization → Groups → GroupName → DevSecOps** in the Fluid Attacks platform and click **Manage token**. The token is valid for 180 days.
+- **OpenID Connect (recommended).** No secret to store. In Fluid Attacks, add a trust for issuer `https://token.actions.githubusercontent.com` with the bound claim `repository` = `my-org/my-repo` and enable it for the group. See the [OIDC federation guide](https://docs.fluidattacks.com/find-fix/use-cli/authentication/oidc-federation).
+- **CI Gate token.** In your repository, go to **Settings → Secrets and variables → Actions** and create a new secret named `FA_API_TOKEN` with your CI Gate token. To generate or retrieve the token, go to **Organization → Groups → GroupName → DevSecOps** in the Fluid Attacks platform and click **Manage token**. The token is valid for 180 days.
 
 ### 2. Create the GitHub Actions workflow
 
@@ -25,36 +26,71 @@ jobs:
   ci-gate:
     runs-on: ubuntu-latest
     permissions:
+      id-token: write # only for OpenID Connect
       contents: read
     steps:
       - uses: fluidattacks/ci-gate-action@<version>
         id: gate
         with:
-          api_token: ${{ secrets.FA_API_TOKEN }}
+          group: my-group
           repo_name: my-repo
 ```
 
-Replace `<version>` with the latest release tag and `my-repo` with the repository nickname configured in the Fluid Attacks platform. Push the file and the check will run automatically.
+Replace `<version>` with the latest release tag, `my-group` with your Fluid Attacks group, and `my-repo` with the repository nickname configured in the Fluid Attacks platform. To use a token instead of OpenID Connect, add `api_token: ${{ secrets.FA_API_TOKEN }}` and drop the `id-token` permission. Push the file and the check will run automatically.
 
 > **Why `pull_request_target` instead of `pull_request`?**
 > GitHub withholds secrets from workflows triggered by `pull_request` when the PR comes from a fork,
-> so the action would fail to authenticate. `pull_request_target` runs in the context of the base branch
+> so the action would fail to authenticate with a token. `pull_request_target` runs in the context of the base branch
 > and always has access to secrets. This is safe here because the action never checks out or executes
 > any code from the PR — it only calls the Fluid Attacks API.
 
 ## Prerequisites
 
 - A Fluid Attacks account with an active group and a repository configured on the platform.
-- A **CI Gate token** generated from the **DevSecOps** section of the platform.
+- Credentials: a trust for your repository (OpenID Connect), or a **CI Gate token** generated from the **DevSecOps** section of the platform.
 - GitHub Actions enabled on the repository.
 - A **Linux runner** (`ubuntu-latest` or equivalent) — the action requires Docker, which is only available on Linux-hosted runners.
 - The step runs directly on the runner, not inside a job container (`jobs.<job_id>.container`), because the action mounts the workspace into its own container.
 
+## Authentication
+
+The gate has nothing to check without credentials, so unlike the scanner actions it never runs unauthenticated: the job fails if it has none.
+
+### OpenID Connect (recommended)
+
+No secret to store. Set the `group` input and grant the job `id-token: write`:
+
+```yaml
+permissions:
+  id-token: write
+  contents: read
+jobs:
+  ci-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: fluidattacks/ci-gate-action@<version>
+        with:
+          group: my-group
+```
+
+In Fluid Attacks, add a trust for issuer `https://token.actions.githubusercontent.com` with the bound claim `repository` = `my-org/my-repo` and enable it for the group. See the [OIDC federation guide](https://docs.fluidattacks.com/find-fix/use-cli/authentication/oidc-federation).
+
+### CI Gate token
+
+```yaml
+- uses: fluidattacks/ci-gate-action@<version>
+  with:
+    group: my-group
+    api_token: ${{ secrets.FA_API_TOKEN }}
+```
+
+The token takes precedence over OpenID Connect. The action passes it to the container as an environment variable, never in the command line.
+
 ## How it works
 
-The action runs the Fluid Attacks CI Gate (`ghcr.io/fluidattacks/forces:latest`) as a Docker container. The gate authenticates with the Fluid Attacks platform using the CI Gate token, retrieves the vulnerability findings already reported for the specified repository, and evaluates them against your group's security policies.
+The action runs the Fluid Attacks CI Gate (`ghcr.io/fluidattacks/forces:latest`) as a Docker container. The gate authenticates with the Fluid Attacks platform, retrieves the vulnerability findings already reported for the specified repository, and evaluates them against your group's security policies.
 
-In lax mode (default), the job passes even when vulnerabilities break policy, and `vulnerabilities_found` tells you whether they did. In strict mode, the job fails with exit code 66 when they do. In both modes, the job fails if the gate itself cannot finish, for example because the token is invalid.
+In lax mode (default), the job passes even when vulnerabilities break policy, and `vulnerabilities_found` tells you whether they did. In strict mode, the job fails with exit code 66 when they do. In both modes, the job fails if the gate itself cannot finish, for example because the credentials are invalid.
 
 The container runs in the job workspace, mounted read-only. If the workflow checks out the repository before this step, the gate reads the commit, branch and origin from Git. Otherwise, it takes the commit and branch from GitHub (`GITHUB_SHA` and `GITHUB_REF_NAME`). The gate needs no Git credentials, so set `persist-credentials: false` on `actions/checkout`. With `pull_request_target`, keep the checkout on its default ref, the base branch, and do not check out the pull request's code.
 
@@ -62,7 +98,8 @@ The container runs in the job workspace, mounted read-only. If the workflow chec
 
 | Input | Required | Default | Description |
 |---|---|---|---|
-| `api_token` | Yes | — | CI Gate token for authenticating with the Fluid Attacks platform. Use a secret: `${{ secrets.FA_API_TOKEN }}`. |
+| `group` | Yes | — | Fluid Attacks group of the repository. Required with both ways of authenticating. |
+| `api_token` | No | — | CI Gate token, used when OpenID Connect is not an option. Use a secret: `${{ secrets.FA_API_TOKEN }}`. Takes precedence over OpenID Connect. When omitted, the action authenticates with OpenID Connect. See [Authentication](#authentication). |
 | `repo_name` | No | GitHub repo name | Repository nickname as configured in the Fluid Attacks platform. When not set, defaults to the GitHub repository name (`GITHUB_REPOSITORY` minus the owner prefix). |
 | `strict` | No | `false` | Set to `true` to enable strict mode. The job fails if open or untreated vulnerabilities that break policy are found. |
 | `report_output_path` | No | — | Path relative to the workspace root where the JSON report will be saved. It must stay inside the workspace. If not set, the report is not saved in the workspace. |
@@ -91,7 +128,7 @@ Set `strict: true` to make the job fail when policy-breaking vulnerabilities are
 ```yaml
 - uses: fluidattacks/ci-gate-action@<version>
   with:
-    api_token: ${{ secrets.FA_API_TOKEN }}
+    group: my-group
     repo_name: my-repo
     strict: true
 ```
@@ -106,7 +143,7 @@ Use `report_output_path` to write the full report to a file, then upload it as a
 - uses: fluidattacks/ci-gate-action@<version>
   id: gate
   with:
-    api_token: ${{ secrets.FA_API_TOKEN }}
+    group: my-group
     repo_name: my-repo
     report_output_path: fa-report.json
 
@@ -126,7 +163,7 @@ Run in lax mode but fail the job manually based on the output:
 - uses: fluidattacks/ci-gate-action@<version>
   id: gate
   with:
-    api_token: ${{ secrets.FA_API_TOKEN }}
+    group: my-group
     repo_name: my-repo
 
 - name: Fail if vulnerabilities found
@@ -136,9 +173,19 @@ Run in lax mode but fail the job manually based on the output:
 
 ## Troubleshooting
 
+### The action fails with "CI Gate needs credentials"
+
+The job has neither `api_token` nor OpenID Connect credentials. Grant the job `permissions: id-token: write`, or provide `api_token`. Pull requests from forks get neither the permission nor secrets.
+
 ### The action fails with an authentication error
 
-Verify that your CI Gate token is correct and has not expired. Tokens are valid for 180 days. To renew it, go to **Organization → Groups → GroupName → DevSecOps** in the platform and click **Manage token**. Update the `FA_API_TOKEN` secret in your repository with the new token.
+With a token, verify that it is correct, has not expired, and belongs to the group in the `group` input. Tokens are valid for 180 days. To renew it, go to **Organization → Groups → GroupName → DevSecOps** in the platform and click **Manage token**. Update the `FA_API_TOKEN` secret in your repository with the new token.
+
+With OpenID Connect, verify that the group has a trust for your repository. See [OpenID Connect](#openid-connect-recommended).
+
+### The job fails with "Invalid 'group' value"
+
+The `group` input must be the name of your Fluid Attacks group: letters, digits, dots, underscores and hyphens, starting with a letter or digit.
 
 ### You see the error "Remote check failed"
 
@@ -152,7 +199,7 @@ Confirm that the `repo_name` input matches the repository nickname configured in
 
 If `strict: true` is set, the job fails with exit code 66 whenever policy-breaking vulnerabilities are found. This is intentional. Set `strict: false` if you want the check to report results without failing the pipeline.
 
-Any other non-zero exit code means the check did not finish, and the log shows the reason as an error. `CI Gate failed with exit code` followed by the code comes from the gate: check the token, the `repo_name` input and the network access to the Fluid Attacks platform. Exit code 2 with `must be a single line` or `must be a file path inside the workspace` points to the `repo_name` or `report_output_path` inputs.
+Any other non-zero exit code means the check did not finish, and the log shows the reason as an error. `CI Gate failed with exit code` followed by the code comes from the gate: check the credentials, the `group` and `repo_name` inputs and the network access to the Fluid Attacks platform. The errors `must be a single line` and `must be a file path inside the workspace` point to the `repo_name` or `report_output_path` inputs.
 
 ### The action fails on a non-Linux runner
 
